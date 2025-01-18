@@ -90,4 +90,4 @@ This visual organization system significantly reduces the time needed to locate 
 - Maintains color consistency across QGIS sessions
 
 
-Renato Henriques - University of Minho/Institute of Earth Sciences
+___Renato Henriques - University of Minho/Institute of Earth Sciences___
