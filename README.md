@@ -1,5 +1,9 @@
 # Layer Color Plugin
 
+
+![ScreenShoot](screenshot.png "Layers panel example using Layer Color Plugin")
+
+
 This is a QGIS plugin that enables users to customize the background colors of layers and groups in the layer tree view, enhancing visual organization and project management. This plugin streamlines the organization and management of complex QGIS projects by allowing users to visually distinguish different layers through custom background colors. 
 
 **Tip:** Always choose pastel or lighter colors. The code implements WCAG 2.0 contrast ratio checking to avoid colors that can make it hard to read the layer text. 
