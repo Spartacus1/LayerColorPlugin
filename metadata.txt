@@ -1,0 +1,16 @@
+[general]
+icon=icon.png
+name=Layer Color Plugin
+qgisMinimumVersion=3.0
+qgisMaximumVersion=3.99
+description=This plugin enables users to customize the background colors of layers and groups in the layer tree view, enhancing visual organization and project management. It streamlines the organization and management of complex QGIS projects by allowing users to visually distinguish different layers or groups through custom background colors.  
+Tip: Always choose pastel or lighter colors. The code implements WCAG 2.0 contrast ratio checking to avoid colors that can make hard to read the layer text. 
+version=0.1
+author=Renato Henriques - University of Minho / Institute of Earth Sciences
+email=rhenriques@dct.uminho.pt
+
+homepage=https://github.com/Spartacus1/LayerColorPlugin
+tracker=https://github.com/Spartacus1/LayerColorPlugin/issues
+repository=https://github.com/Spartacus1/LayerColorPlugin
+experimental=False
+deprecated=False
