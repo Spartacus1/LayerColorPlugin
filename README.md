@@ -88,3 +88,6 @@ This visual organization system significantly reduces the time needed to locate 
 - Automatically saves colors when the project is saved
 - Restores color settings when projects are loaded
 - Maintains color consistency across QGIS sessions
+
+
+Renato Henriques - University of Minho/Institute of Earth Sciences
