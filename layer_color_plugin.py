@@ -268,46 +268,44 @@ class LayerColorPlugin:
         self.layer_tree_view.viewport().update()
 
     def save_colors(self):
-        """
-        Save custom colors in the project for layers and groups
-        """
         try:
-            root = self.iface.layerTreeView().layerTreeModel().rootGroup()
-            for node in root.children():
-                if hasattr(node, "customProperty"):  # Check if the node supports custom properties
+            def save_node_colors(node):
+                if hasattr(node, "customProperty"):
                     name = node.name()
                     color = self.layer_colors.get(name)
                     if color:
                         node.setCustomProperty("highlight_color", color)
                         log_message(f"Saving color '{color}' para '{name}'")
+                
+                # Recursivamente processa os filhos
+                for child in node.children():
+                    save_node_colors(child)
+                    
+            root = self.iface.layerTreeView().layerTreeModel().rootGroup()
+            save_node_colors(root)
             log_message("All colors were successfully saved in the project.")
         except Exception as e:
             log_message(f"Error while saving colors: {str(e)}")
 
     def load_colors(self):
-        """
-        Load custom colors from the project for layers and groups
-        """
         self.layer_colors.clear()
         try:
-            root = self.iface.layerTreeView().layerTreeModel().rootGroup()
-            for node in root.children():
-                if hasattr(node, "customProperty"):  # Check if the node supports custom properties
+            def load_node_colors(node):
+                if hasattr(node, "customProperty"):
                     color = node.customProperty("highlight_color")
                     if color:
                         self.layer_colors[node.name()] = color
                         log_message(f"Cor '{color}' loaded for '{node.name()}'")
+                
+                for child in node.children():
+                    load_node_colors(child)
+                    
+            root = self.iface.layerTreeView().layerTreeModel().rootGroup()
+            load_node_colors(root)
             self.layer_tree_view.viewport().update()
             log_message("All colors were successfully restored.")
         except Exception as e:
             log_message(f"Error loading colors: {str(e)}")
-
-    def get_layer_by_name(self, layer_name):
-        root = self.iface.layerTreeView().layerTreeModel().rootGroup()
-        for node in root.children():
-            if node.name() == layer_name:
-                return node
-        return None
 
 
 class LayerColorDelegate(QStyledItemDelegate):
