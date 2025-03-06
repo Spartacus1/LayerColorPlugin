@@ -20,6 +20,8 @@ changelog=
  Version 0.4:
  * Highlight colors are now applied to specific layers or groups (previously all layers or groups with the same name had the same highlight color applied).
 
+ * Color selector now initialized with the first custom color in the list of selected layers or groups (previously it was always initialized to white).
+ 
    (changes by Alexander Hajnal – github.com/Alex-Kent)
 
  Version 0.3:

@@ -199,8 +199,24 @@ class LayerColorPlugin:
         if not selected_nodes:
             return
     
+        # Find color of first layer or group that has one set
+        extant_color = None
+        for layer in selected_nodes:
+            if extant_color:
+                break
+            if hasattr(layer, "customProperty"):
+                extant_color = layer.customProperty("highlight_color", None)
+                if extant_color:
+                    break
+        
         # Open the color dialog only once
-        color = QColorDialog.getColor()
+        if extant_color:
+            # A colored layer of greoup was found
+            color = QColorDialog.getColor(QColor(extant_color))
+        else:
+            # No layer of greoup had a color set
+            color = QColorDialog.getColor()
+        
         if color.isValid():
             # Check contrast
             contrast_ratio = self.calculate_contrast_ratio(color.name())
