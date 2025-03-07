@@ -51,7 +51,6 @@ class LayerColorPlugin:
         
     def __init__(self, iface):
         self.iface = iface
-        self.layer_colors = {}
         self.plugin_dir = os.path.dirname(__file__)
 
     def initGui(self):
