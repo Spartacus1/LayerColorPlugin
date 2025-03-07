@@ -17,6 +17,11 @@ icon=icon.png
 
 changelog=
 
+ Version 0.4:
+ * Color selector now initialized with the first custom color in the list of selected layers or groups (previously it was always initialized to white).
+ 
+   (changes by Alexander Hajnal – github.com/Alex-Kent)
+
  Version 0.3:
  * Fixes a minor issue where, under certain conditions, a layer does not retain its color after the project is closed if the color change is made while it is inside a group.
 
