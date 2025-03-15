@@ -1,5 +1,14 @@
 import os
 from qgis.core import QgsMessageLog, Qgis, QgsProject
+
+try:
+  from qgis.gui import QgsLayerTreeViewItemDelegate
+  has_QgsLayerTreeViewItemDelegate = True
+except:
+  # QgsLayerTreeViewItemDelegate isn't exported
+  # Will fall back to using QStyledItemDelegate
+  has_QgsLayerTreeViewItemDelegate = False
+
 from PyQt5.QtWidgets import QColorDialog, QAction, QMenu, QStyledItemDelegate
 from PyQt5.QtGui import QColor, QPainter, QIcon
 from PyQt5.QtCore import Qt
@@ -91,7 +100,10 @@ class LayerColorPlugin:
 
             # Restore the original delegate
             if hasattr(self, "delegate") and self.delegate is not None:
-                original_delegate = QStyledItemDelegate(self.layer_tree_view)
+                if has_QgsLayerTreeViewItemDelegate:
+                    original_delegate = QgsLayerTreeViewItemDelegate(self.layer_tree_view)
+                else:
+                    original_delegate = QStyledItemDelegate(self.layer_tree_view)
                 self.layer_tree_view.setItemDelegate(original_delegate)
                 self.delegate = None
 
@@ -308,7 +320,12 @@ class LayerColorPlugin:
             log_message(f"Error loading colors: {str(e)}")
 
 
-class LayerColorDelegate(QStyledItemDelegate):
+if has_QgsLayerTreeViewItemDelegate:
+  delegateClass = QgsLayerTreeViewItemDelegate
+else:
+  delegateClass = QStyledItemDelegate
+
+class LayerColorDelegate( delegateClass ):
     def __init__(self, layer_colors, parent=None):
         super().__init__(parent)
         self.layer_colors = layer_colors
