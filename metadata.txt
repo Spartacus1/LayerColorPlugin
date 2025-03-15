@@ -22,6 +22,8 @@ changelog=
 
  * Color selector now initialized with the first custom color in the list of selected layers or groups (previously it was always initialized to white).
  
+ * If possible, QGIS additions to layer tree entries (e.g. status icons) are now displayed.  (i.e. when possible subclasses QgsLayerTreeViewItemDelegate instead of QStyledItemDelegate.)
+ 
    (changes by Alexander Hajnal – github.com/Alex-Kent)
 
  Version 0.3:
