@@ -7,9 +7,10 @@ try:
 except:
   # QgsLayerTreeViewItemDelegate isn't exported
   # Will fall back to using QStyledItemDelegate
+  from PyQt5.QtWidgets import QStyledItemDelegate
   has_QgsLayerTreeViewItemDelegate = False
 
-from PyQt5.QtWidgets import QColorDialog, QAction, QMenu, QStyledItemDelegate
+from PyQt5.QtWidgets import QColorDialog, QAction, QMenu
 from PyQt5.QtGui import QColor, QPainter, QIcon
 from PyQt5.QtCore import Qt
 
