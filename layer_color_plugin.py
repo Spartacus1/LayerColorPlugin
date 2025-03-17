@@ -1,6 +1,16 @@
 import os
-from qgis.core import QgsMessageLog, Qgis, QgsProject
-from PyQt5.QtWidgets import QColorDialog, QAction, QMenu, QStyledItemDelegate
+from qgis.core import QgsMessageLog, Qgis, QgsProject, QgsLayerTree
+
+try:
+  from qgis.gui import QgsLayerTreeViewItemDelegate
+  has_QgsLayerTreeViewItemDelegate = True
+except:
+  # QgsLayerTreeViewItemDelegate isn't exported
+  # Will fall back to using QStyledItemDelegate
+  from PyQt5.QtWidgets import QStyledItemDelegate
+  has_QgsLayerTreeViewItemDelegate = False
+
+from PyQt5.QtWidgets import QColorDialog, QAction, QMenu
 from PyQt5.QtGui import QColor, QPainter, QIcon
 from PyQt5.QtCore import Qt
 
@@ -22,8 +32,7 @@ class LayerColorPlugin:
             return
 
         node = selected_nodes[0]
-        node_name = node.name()
-        color = self.layer_colors.get(node_name)
+        color = node.customProperty('highlight_color', None)
         if color:
             LayerColorPlugin.clipboard_color = color
             log_message(f"Cor '{color}' copied to the clipboard.")
@@ -42,10 +51,9 @@ class LayerColorPlugin:
     
         # Aplicar a cor a todos os nós selecionados
         for node in selected_nodes:
-            node_name = node.name()
-            self.layer_colors[node_name] = LayerColorPlugin.clipboard_color
             node.setCustomProperty("highlight_color", LayerColorPlugin.clipboard_color)  # Keep the color
-            log_message(f"Cor '{LayerColorPlugin.clipboard_color}' pasted in item '{node_name}'.")
+            name = node.layerId() if QgsLayerTree.isLayer(node) else node.name()
+            log_message(f"Cor '{LayerColorPlugin.clipboard_color}' pasted in item '{name}'.")
     
         # Update the visualization only once after applying to all layers
         self.layer_tree_view.viewport().update()
@@ -53,7 +61,6 @@ class LayerColorPlugin:
         
     def __init__(self, iface):
         self.iface = iface
-        self.layer_colors = {}
         self.plugin_dir = os.path.dirname(__file__)
 
     def initGui(self):
@@ -63,7 +70,8 @@ class LayerColorPlugin:
                 raise Exception("Layer Tree View not available")
             
             # Delegate customized
-            self.delegate = LayerColorDelegate(self.layer_colors, self.layer_tree_view)
+            # The first arguemnt (self) is passed to the delegate class's constructor
+            self.delegate = LayerColorDelegate(self, self.layer_tree_view)
             self.layer_tree_view.setItemDelegate(self.delegate)
 
             # Connect signal from the context menu
@@ -91,17 +99,16 @@ class LayerColorPlugin:
 
             # Restore the original delegate
             if hasattr(self, "delegate") and self.delegate is not None:
-                original_delegate = QStyledItemDelegate(self.layer_tree_view)
+                if has_QgsLayerTreeViewItemDelegate:
+                    original_delegate = QgsLayerTreeViewItemDelegate(self.layer_tree_view)
+                else:
+                    original_delegate = QStyledItemDelegate(self.layer_tree_view)
                 self.layer_tree_view.setItemDelegate(original_delegate)
                 self.delegate = None
 
             # Disconnect signals
             QgsProject.instance().writeProject.disconnect(self.save_colors)
             self.iface.projectRead.disconnect(self.load_colors)
-
-            # Clear color dictionary
-            if hasattr(self, "layer_colors"):
-                self.layer_colors.clear()
 
             # Update interface
             if hasattr(self, "layer_tree_view"):
@@ -204,8 +211,24 @@ class LayerColorPlugin:
         if not selected_nodes:
             return
     
+        # Find color of first layer or group that has one set
+        extant_color = None
+        for layer in selected_nodes:
+            if extant_color:
+                break
+            if hasattr(layer, "customProperty"):
+                extant_color = layer.customProperty("highlight_color", None)
+                if extant_color:
+                    break
+        
         # Open the color dialog only once
-        color = QColorDialog.getColor()
+        if extant_color:
+            # A colored layer of greoup was found
+            color = QColorDialog.getColor(QColor(extant_color))
+        else:
+            # No layer of greoup had a color set
+            color = QColorDialog.getColor()
+        
         if color.isValid():
             # Check contrast
             contrast_ratio = self.calculate_contrast_ratio(color.name())
@@ -242,10 +265,9 @@ class LayerColorPlugin:
     
             # Apply the color to all selected nodes
             for layer in selected_nodes:
-                layer_name = layer.name()
-                self.layer_colors[layer_name] = color.name()
                 layer.setCustomProperty("highlight_color", color.name())  # Persist the color
-                log_message(f"Camada ou grupo: {layer_name}, Cor atribuída: {color.name()}")
+                name = layer.layerId() if QgsLayerTree.isLayer(layer) else layer.name()
+                log_message(f"Camada ou grupo: {name}, Cor atribuída: {color.name()}")
             
             # Update the visualization only once after applying to all layers
             self.layer_tree_view.viewport().update()
@@ -258,11 +280,12 @@ class LayerColorPlugin:
     
         # Remove the color from all selected nodes
         for layer in selected_nodes:
-            layer_name = layer.name()
-            if layer_name in self.layer_colors:
-                del self.layer_colors[layer_name]
-                layer.removeCustomProperty("highlight_color")  # Remove the persistent property
-                log_message(f"Color removed from the layer or group: {layer_name}")
+            if hasattr(layer, "customProperty"):
+                color = layer.customProperty("highlight_color", None)
+                if color:
+                    layer.removeCustomProperty("highlight_color")  # Remove the persistent property
+                    name = layer.layerId() if QgsLayerTree.isLayer(layer) else layer.name()
+                    log_message(f"Color removed from the layer or group: {name}")
         
         # Update the visualization only once after removing from all layers
         self.layer_tree_view.viewport().update()
@@ -271,10 +294,10 @@ class LayerColorPlugin:
         try:
             def save_node_colors(node):
                 if hasattr(node, "customProperty"):
-                    name = node.name()
-                    color = self.layer_colors.get(name)
+                    color = node.customProperty("highlight_color", None)
                     if color:
                         node.setCustomProperty("highlight_color", color)
+                        name = node.layerId() if QgsLayerTree.isLayer(node) else node.name()
                         log_message(f"Saving color '{color}' para '{name}'")
                 
                 # Recursivamente processa os filhos
@@ -288,39 +311,56 @@ class LayerColorPlugin:
             log_message(f"Error while saving colors: {str(e)}")
 
     def load_colors(self):
-        self.layer_colors.clear()
         try:
             def load_node_colors(node):
+                # This function prints any custom colors applied to layers or groups to the message log.
+                # It is not needed for the rest of the code to function.
                 if hasattr(node, "customProperty"):
                     color = node.customProperty("highlight_color")
                     if color:
-                        self.layer_colors[node.name()] = color
-                        log_message(f"Cor '{color}' loaded for '{node.name()}'")
+                        name = node.layerId() if QgsLayerTree.isLayer(node) else node.name()
+                        log_message(f"Cor '{color}' loaded for '{name}'")
                 
                 for child in node.children():
                     load_node_colors(child)
-                    
+            
+            # Print custom layer/group colors to the message log
             root = self.iface.layerTreeView().layerTreeModel().rootGroup()
             load_node_colors(root)
+            
+            # Apply the colors to the displayed layers tree
             self.layer_tree_view.viewport().update()
             log_message("All colors were successfully restored.")
         except Exception as e:
             log_message(f"Error loading colors: {str(e)}")
 
 
-class LayerColorDelegate(QStyledItemDelegate):
+if has_QgsLayerTreeViewItemDelegate:
+  delegateClass = QgsLayerTreeViewItemDelegate
+else:
+  delegateClass = QStyledItemDelegate
+
+class LayerColorDelegate( delegateClass ):
     def __init__(self, layer_colors, parent=None):
         super().__init__(parent)
-        self.layer_colors = layer_colors
+        # Store a reference to the layer color plugin instance that created this delegate.
+        # This gives the delegate access to e.g. the layers tree and its layer/group objects
+        self.layer_color_plugin = layer_colors
 
     def paint(self, painter, option, index):
-        layer_name = index.data(Qt.DisplayRole)
-        if layer_name in self.layer_colors:
-            painter.save()
-            color = QColor(self.layer_colors[layer_name])
-            painter.fillRect(option.rect, color)
-            painter.restore()
+        # Try to get the layer or layer group object that is being painted
+        node = self.layer_color_plugin.layer_tree_view.index2node(index)
+        if node:
+            # Got the object, see if it has a custom color set
+            color = node.customProperty('highlight_color', None)
+            if color:
+                # Layer or group has a color sprecified so apply it as the background color
+                painter.save()
+                painter.fillRect(option.rect, QColor(color))
+                painter.restore()
 
+        # Continue painting (e.g. the label text) using the default painter
         super().paint(painter, option, index)
 
 # Renato Henriques - Universidade do Minho/Instituto de Ciências da Terra
+# Updates by Alexander Hajnal  github.com/Alex-Kent

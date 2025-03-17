@@ -6,7 +6,7 @@ qgisMinimumVersion=3.0
 qgisMaximumVersion=3.99
 description=This plugin enables users to customize the background colors of layers and groups in the layer tree view, enhancing visual organization and project management. 
 about=It streamlines the organization and management of complex QGIS projects by allowing users to visually distinguish different layers or groups through custom background colors. This plugin adds a menu called "Layer Highlight Color", located above the "Properties" in the "Layer Properties" menu. Always choose pastel or lighter colors. The code implements "WCAG 2.0" contrast ratio checking to avoid colors that can make hard to read the layer text. 
-version=0.3
+version=0.4
 
 homepage=https://github.com/Spartacus1/LayerColorPlugin
 tracker=https://github.com/Spartacus1/LayerColorPlugin/issues
@@ -16,6 +16,15 @@ deprecated=False
 icon=icon.png
 
 changelog=
+
+ Version 0.4:
+ * Highlight colors are now applied to specific layers or groups (previously all layers or groups with the same name had the same highlight color applied).
+
+ * Color selector now initialized with the first custom color in the list of selected layers or groups (previously it was always initialized to white).
+ 
+ * If possible, QGIS additions to layer tree entries (e.g. status icons) are now displayed.  (i.e. when possible subclasses QgsLayerTreeViewItemDelegate instead of QStyledItemDelegate.)
+ 
+   (changes by Alexander Hajnal – github.com/Alex-Kent)
 
  Version 0.3:
  * Fixes a minor issue where, under certain conditions, a layer does not retain its color after the project is closed if the color change is made while it is inside a group.
