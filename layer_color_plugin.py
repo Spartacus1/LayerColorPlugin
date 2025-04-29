@@ -1,8 +1,8 @@
 import os
-from qgis.core import QgsMessageLog, Qgis, QgsProject
-from PyQt5.QtWidgets import QColorDialog, QAction, QMenu, QStyledItemDelegate
+from qgis.core import QgsMessageLog, Qgis, QgsProject, QgsMapLayer
+from PyQt5.QtWidgets import QColorDialog, QAction, QMenu, QStyledItemDelegate, QWidget
 from PyQt5.QtGui import QColor, QPainter, QIcon
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QObject, QEvent
 
 def log_message(message):
     """
@@ -15,6 +15,65 @@ def log_message(message):
 class LayerColorPlugin:
     clipboard_color = None  # Variable to store the copied color
 
+    def __init__(self, iface):
+        self.iface = iface
+        self.layer_colors = {}
+        self.plugin_dir = os.path.dirname(__file__)
+        self.event_filter = None  # Event filter to draw background colors
+
+    def initGui(self):
+        try:
+            # Plugin icon
+            icon_path = os.path.join(self.plugin_dir, 'icon.png')
+            if os.path.exists(icon_path):
+                self.iface.mainWindow().setWindowIcon(QIcon(icon_path))
+    
+            # 1) Get the layer tree view
+            self.layer_tree_view = self.iface.layerTreeView()
+            if not self.layer_tree_view:
+                raise Exception("Layer Tree View not available")
+    
+            # 2) Instead of replacing the delegate, we'll use an event filter
+            self.event_filter = LayerTreeViewEventFilter(self.layer_colors, self.layer_tree_view)
+            self.layer_tree_view.viewport().installEventFilter(self.event_filter)
+    
+            # 3) Connect the context menu and project events
+            self.layer_tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.layer_tree_view.customContextMenuRequested.connect(self.show_context_menu)
+            QgsProject.instance().writeProject.connect(self.save_colors)
+            self.iface.projectRead.connect(self.load_colors)
+    
+            # 4) If there's already a project loaded, restore colors now
+            if self.iface.activeLayer():
+                self.load_colors()
+    
+        except Exception as e:
+            log_message(f"Error during plugin initialization: {str(e)}")
+    
+    def unload(self):
+        try:
+            # 1) Disconnect the context menu
+            if hasattr(self, "layer_tree_view"):
+                try:
+                    self.layer_tree_view.customContextMenuRequested.disconnect(self.show_context_menu)
+                except:
+                    pass
+    
+            # 2) Disconnect the project save and load signals
+            try:
+                QgsProject.instance().writeProject.disconnect(self.save_colors)
+                self.iface.projectRead.disconnect(self.load_colors)
+            except:
+                pass
+    
+            # 3) Remove the event filter
+            if self.event_filter and hasattr(self, "layer_tree_view"):
+                self.layer_tree_view.viewport().removeEventFilter(self.event_filter)
+                self.event_filter = None
+    
+        except Exception as e:
+            log_message(f"Error during plugin unload: {str(e)}")
+
     def copy_highlight_color(self):
         selected_nodes = self.layer_tree_view.selectedNodes()
         if not selected_nodes:
@@ -26,7 +85,7 @@ class LayerColorPlugin:
         color = self.layer_colors.get(node_name)
         if color:
             LayerColorPlugin.clipboard_color = color
-            log_message(f"Cor '{color}' copied to the clipboard.")
+            log_message(f"Color '{color}' copied to the clipboard.")
         else:
             log_message("No color assigned to the selected item.")
 
@@ -40,75 +99,38 @@ class LayerColorPlugin:
             log_message("No layer or group selected to paste the color.")
             return
     
-        # Aplicar a cor a todos os nós selecionados
+        # Apply the color to all selected nodes
         for node in selected_nodes:
             node_name = node.name()
+            
+            # Check if it's a temporary layer
+            if self.is_temporary_layer(node):
+                log_message(f"Skipping temporary layer: {node_name}")
+                continue
+                
             self.layer_colors[node_name] = LayerColorPlugin.clipboard_color
             node.setCustomProperty("highlight_color", LayerColorPlugin.clipboard_color)  # Keep the color
-            log_message(f"Cor '{LayerColorPlugin.clipboard_color}' pasted in item '{node_name}'.")
+            log_message(f"Color '{LayerColorPlugin.clipboard_color}' pasted in item '{node_name}'.")
     
         # Update the visualization only once after applying to all layers
         self.layer_tree_view.viewport().update()
         
-        
-    def __init__(self, iface):
-        self.iface = iface
-        self.layer_colors = {}
-        self.plugin_dir = os.path.dirname(__file__)
-
-    def initGui(self):
+    def is_temporary_layer(self, node):
+        """
+        Checks if a layer tree node is a temporary layer.
+        """
         try:
-            self.layer_tree_view = self.iface.layerTreeView()
-            if not self.layer_tree_view:
-                raise Exception("Layer Tree View not available")
-            
-            # Delegate customized
-            self.delegate = LayerColorDelegate(self.layer_colors, self.layer_tree_view)
-            self.layer_tree_view.setItemDelegate(self.delegate)
-
-            # Connect signal from the context menu
-            self.layer_tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
-            self.layer_tree_view.customContextMenuRequested.connect(self.show_context_menu)
-
-            # Connect to the project save event
-            QgsProject.instance().writeProject.connect(self.save_colors)
-
-            # Connect to the project load event
-            self.iface.projectRead.connect(self.load_colors)
-
-            # Load initial colors if the project is already loaded
-            if self.iface.activeLayer():
-                self.load_colors()
-
+            # Check if it's a layer node and not a group
+            if hasattr(node, 'layer'):
+                layer = node.layer()
+                if layer:
+                    # Check if the layer has the 'isTemporary' property
+                    return layer.customProperty("isTemporary") == "true" or layer.customProperty("temporary") == "true"
+                    
+            return False
         except Exception as e:
-            log_message(f"Error during plugin initialization: {str(e)}")
-
-    def unload(self):
-        try:
-            # Disconnect signal from the context menu
-            if hasattr(self, "layer_tree_view"):
-                self.layer_tree_view.customContextMenuRequested.disconnect(self.show_context_menu)
-
-            # Restore the original delegate
-            if hasattr(self, "delegate") and self.delegate is not None:
-                original_delegate = QStyledItemDelegate(self.layer_tree_view)
-                self.layer_tree_view.setItemDelegate(original_delegate)
-                self.delegate = None
-
-            # Disconnect signals
-            QgsProject.instance().writeProject.disconnect(self.save_colors)
-            self.iface.projectRead.disconnect(self.load_colors)
-
-            # Clear color dictionary
-            if hasattr(self, "layer_colors"):
-                self.layer_colors.clear()
-
-            # Update interface
-            if hasattr(self, "layer_tree_view"):
-                self.layer_tree_view.viewport().update()
-
-        except Exception as e:
-            log_message(f"Erro durante unload: {str(e)}")
+            log_message(f"Error checking if layer is temporary: {str(e)}")
+            return False
 
     def show_context_menu(self, point):
         # Temporarily disconnect the signal
@@ -243,9 +265,15 @@ class LayerColorPlugin:
             # Apply the color to all selected nodes
             for layer in selected_nodes:
                 layer_name = layer.name()
+                
+                # Check if it's a temporary layer
+                if self.is_temporary_layer(layer):
+                    log_message(f"Skipping temporary layer: {layer_name}")
+                    continue
+                    
                 self.layer_colors[layer_name] = color.name()
                 layer.setCustomProperty("highlight_color", color.name())  # Persist the color
-                log_message(f"Camada ou grupo: {layer_name}, Cor atribuída: {color.name()}")
+                log_message(f"Layer or group: {layer_name}, Color assigned: {color.name()}")
             
             # Update the visualization only once after applying to all layers
             self.layer_tree_view.viewport().update()
@@ -268,59 +296,106 @@ class LayerColorPlugin:
         self.layer_tree_view.viewport().update()
 
     def save_colors(self):
+        """
+        Save custom colors in the project for layers and groups
+        """
         try:
-            def save_node_colors(node):
-                if hasattr(node, "customProperty"):
+            root = self.iface.layerTreeView().layerTreeModel().rootGroup()
+            for node in root.children():
+                if hasattr(node, "customProperty"):  # Check if the node supports custom properties
                     name = node.name()
                     color = self.layer_colors.get(name)
                     if color:
                         node.setCustomProperty("highlight_color", color)
-                        log_message(f"Saving color '{color}' para '{name}'")
-                
-                # Recursivamente processa os filhos
-                for child in node.children():
-                    save_node_colors(child)
-                    
-            root = self.iface.layerTreeView().layerTreeModel().rootGroup()
-            save_node_colors(root)
+                        log_message(f"Saving color '{color}' for '{name}'")
             log_message("All colors were successfully saved in the project.")
         except Exception as e:
             log_message(f"Error while saving colors: {str(e)}")
 
     def load_colors(self):
+        """
+        Load custom colors from the project for layers and groups
+        """
         self.layer_colors.clear()
         try:
-            def load_node_colors(node):
-                if hasattr(node, "customProperty"):
+            root = self.iface.layerTreeView().layerTreeModel().rootGroup()
+            for node in root.children():
+                if hasattr(node, "customProperty"):  # Check if the node supports custom properties
+                    # Don't apply colors to temporary layers
+                    if self.is_temporary_layer(node):
+                        continue
+                        
                     color = node.customProperty("highlight_color")
                     if color:
                         self.layer_colors[node.name()] = color
-                        log_message(f"Cor '{color}' loaded for '{node.name()}'")
-                
-                for child in node.children():
-                    load_node_colors(child)
-                    
-            root = self.iface.layerTreeView().layerTreeModel().rootGroup()
-            load_node_colors(root)
+                        log_message(f"Color '{color}' loaded for '{node.name()}'")
             self.layer_tree_view.viewport().update()
             log_message("All colors were successfully restored.")
         except Exception as e:
             log_message(f"Error loading colors: {str(e)}")
 
+    def get_layer_by_name(self, layer_name):
+        root = self.iface.layerTreeView().layerTreeModel().rootGroup()
+        for node in root.children():
+            if node.name() == layer_name:
+                return node
+        return None
 
-class LayerColorDelegate(QStyledItemDelegate):
+
+class LayerTreeViewEventFilter(QObject):
+    """
+    Event filter to intercept the viewport drawing of the layer tree
+    and add background colors without altering the original delegate.
+    """
     def __init__(self, layer_colors, parent=None):
         super().__init__(parent)
         self.layer_colors = layer_colors
+        self.tree_view = parent
 
-    def paint(self, painter, option, index):
+    def eventFilter(self, obj, event):
+        # Intercept paint events on the viewport
+        if event.type() == QEvent.Paint and obj == self.tree_view.viewport():
+            painter = QPainter(obj)
+            
+            # Iterate through all visible items
+            for i in range(self.tree_view.model().rowCount()):
+                index = self.tree_view.model().index(i, 0)
+                self.draw_background_for_item(painter, index)
+                
+                # Also check child items if expanded
+                self.check_child_items(painter, index)
+            
+            # Let the event continue for normal processing
+            return False  # Don't block the event
+        
+        return False  # Always let other events be processed normally
+    
+    def check_child_items(self, painter, parent_index):
+        """Recursively check all visible child items to color them"""
+        if not self.tree_view.isExpanded(parent_index):
+            return
+            
+        model = self.tree_view.model()
+        for i in range(model.rowCount(parent_index)):
+            child_index = model.index(i, 0, parent_index)
+            self.draw_background_for_item(painter, child_index)
+            
+            # Recursively check children of this item too
+            self.check_child_items(painter, child_index)
+    
+    def draw_background_for_item(self, painter, index):
+        """Draw colored background for an item if it has an assigned color"""
+        # Get the layer name
         layer_name = index.data(Qt.DisplayRole)
+        
+        # Check if this layer has an assigned color
         if layer_name in self.layer_colors:
+            # Get the view rectangle for this item
+            rect = self.tree_view.visualRect(index)
+            
+            # Draw the colored background (only for column 0, where the name is)
             painter.save()
-            color = QColor(self.layer_colors[layer_name])
-            painter.fillRect(option.rect, color)
+            painter.fillRect(rect, QColor(self.layer_colors[layer_name]))
             painter.restore()
-
-        super().paint(painter, option, index)
 
 # Renato Henriques - Universidade do Minho/Instituto de Ciências da Terra
