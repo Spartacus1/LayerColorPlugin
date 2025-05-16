@@ -24,9 +24,9 @@ class LayerColorPlugin:
     def initGui(self):
         try:
             # Plugin icon
-            icon_path = os.path.join(self.plugin_dir, 'icon.png')
-            if os.path.exists(icon_path):
-                self.iface.mainWindow().setWindowIcon(QIcon(icon_path))
+            #icon_path = os.path.join(self.plugin_dir, 'icon.png')
+            #if os.path.exists(icon_path):
+            #    self.iface.mainWindow().setWindowIcon(QIcon(icon_path))
     
             # 1) Get the layer tree view
             self.layer_tree_view = self.iface.layerTreeView()
