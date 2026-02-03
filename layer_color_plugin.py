@@ -388,6 +388,10 @@ class LayerTreeViewEventFilter(QObject):
         # Get the layer name
         layer_name = index.data(Qt.DisplayRole)
         
+        # Handle "Show Feature Count" - remove suffix like " [42]"
+        if layer_name and ' [' in layer_name and layer_name.endswith(']'):
+            layer_name = layer_name[:layer_name.rfind(' [')]
+        
         # Check if this layer has an assigned color
         if layer_name in self.layer_colors:
             # Get the view rectangle for this item
