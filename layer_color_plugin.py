@@ -1,12 +1,12 @@
 import os
-from qgis.core import QgsMessageLog, Qgis, QgsProject, QgsMapLayer
-from PyQt5.QtWidgets import QColorDialog, QAction, QMenu, QStyledItemDelegate, QWidget
-from PyQt5.QtGui import QColor, QPainter, QIcon
+from qgis.core import QgsMessageLog, Qgis, QgsProject
+from PyQt5.QtWidgets import QColorDialog, QAction, QMenu
+from PyQt5.QtGui import QColor, QPainter
 from PyQt5.QtCore import Qt, QObject, QEvent
 
 def log_message(message):
     """
-    "Sends messages to the QGIS log panel and the Python console".
+    Sends messages to the QGIS log panel and the Python console.
     """
     QgsMessageLog.logMessage(message, "LayerColorPlugin", Qgis.Info)
     print(message)  # Shows in the Python console
@@ -42,8 +42,11 @@ class LayerColorPlugin:
             self.layer_tree_view.customContextMenuRequested.connect(self.show_context_menu)
             QgsProject.instance().writeProject.connect(self.save_colors)
             self.iface.projectRead.connect(self.load_colors)
+            
+            # 4) Connect to layer/group rename signal
+            QgsProject.instance().layerTreeRoot().nameChanged.connect(self.on_node_renamed)
     
-            # 4) If there's already a project loaded, restore colors now
+            # 5) If there's already a project loaded, restore colors now
             if self.iface.activeLayer():
                 self.load_colors()
     
@@ -63,6 +66,7 @@ class LayerColorPlugin:
             try:
                 QgsProject.instance().writeProject.disconnect(self.save_colors)
                 self.iface.projectRead.disconnect(self.load_colors)
+                QgsProject.instance().layerTreeRoot().nameChanged.disconnect(self.on_node_renamed)
             except:
                 pass
     
@@ -249,7 +253,7 @@ class LayerColorPlugin:
                 """)
                 msg.setWindowTitle("Layer Color Plugin")
                 
-                # Define minimun window size
+                # Define minimum window size
                 msg.setMinimumWidth(480)
                 
                 # Config buttons
@@ -297,30 +301,42 @@ class LayerColorPlugin:
 
     def save_colors(self):
         """
-        Save custom colors in the project for layers and groups
+        Sync the layer_colors dictionary with custom properties (including subgroups).
+        Note: customProperties are already set in set_layer_color and persisted automatically.
+        This method ensures the dictionary stays in sync with actual node properties.
         """
         try:
             root = self.iface.layerTreeView().layerTreeModel().rootGroup()
-            for node in root.children():
-                if hasattr(node, "customProperty"):  # Check if the node supports custom properties
+            for node in self._get_all_nodes(root):
+                if hasattr(node, "customProperty"):
                     name = node.name()
-                    color = self.layer_colors.get(name)
-                    if color:
-                        node.setCustomProperty("highlight_color", color)
-                        log_message(f"Saving color '{color}' for '{name}'")
+                    # Read the actual customProperty from the node (source of truth)
+                    node_color = node.customProperty("highlight_color")
+                    dict_color = self.layer_colors.get(name)
+                    
+                    if node_color:
+                        # Ensure dictionary is in sync with node property
+                        if dict_color != node_color:
+                            self.layer_colors[name] = node_color
+                        log_message(f"Color '{node_color}' saved for '{name}'")
+                    elif dict_color:
+                        # Dictionary has color but node doesn't - update node
+                        node.setCustomProperty("highlight_color", dict_color)
+                        log_message(f"Color '{dict_color}' synced to '{name}'")
+                        
             log_message("All colors were successfully saved in the project.")
         except Exception as e:
             log_message(f"Error while saving colors: {str(e)}")
 
     def load_colors(self):
         """
-        Load custom colors from the project for layers and groups
+        Load custom colors from the project for layers and groups (including subgroups)
         """
         self.layer_colors.clear()
         try:
             root = self.iface.layerTreeView().layerTreeModel().rootGroup()
-            for node in root.children():
-                if hasattr(node, "customProperty"):  # Check if the node supports custom properties
+            for node in self._get_all_nodes(root):
+                if hasattr(node, "customProperty"):
                     # Don't apply colors to temporary layers
                     if self.is_temporary_layer(node):
                         continue
@@ -334,12 +350,37 @@ class LayerColorPlugin:
         except Exception as e:
             log_message(f"Error loading colors: {str(e)}")
 
+    def on_node_renamed(self, node, old_name):
+        """
+        Handle layer/group rename - update dictionary key to maintain color association.
+        """
+        try:
+            if old_name in self.layer_colors:
+                new_name = node.name()
+                self.layer_colors[new_name] = self.layer_colors.pop(old_name)
+                self.layer_tree_view.viewport().update()
+                log_message(f"Color transferred from '{old_name}' to '{new_name}'")
+        except Exception as e:
+            log_message(f"Error handling node rename: {str(e)}")
+
     def get_layer_by_name(self, layer_name):
         root = self.iface.layerTreeView().layerTreeModel().rootGroup()
         for node in root.children():
             if node.name() == layer_name:
                 return node
         return None
+
+    def _get_all_nodes(self, group):
+        """
+        Recursively get all nodes (layers and groups) from a group.
+        """
+        nodes = []
+        for node in group.children():
+            nodes.append(node)
+            # If node is a group, recursively get its children
+            if hasattr(node, 'children'):
+                nodes.extend(self._get_all_nodes(node))
+        return nodes
 
 
 class LayerTreeViewEventFilter(QObject):
@@ -388,9 +429,13 @@ class LayerTreeViewEventFilter(QObject):
         # Get the layer name
         layer_name = index.data(Qt.DisplayRole)
         
-        # Handle "Show Feature Count" - remove suffix like " [42]"
+        # Handle "Show Feature Count" - remove suffix like " [42]" only if it's numeric
         if layer_name and ' [' in layer_name and layer_name.endswith(']'):
-            layer_name = layer_name[:layer_name.rfind(' [')]
+            bracket_pos = layer_name.rfind(' [')
+            bracket_content = layer_name[bracket_pos+2:-1]
+            # Only strip if content is numeric (digits, commas, periods for thousands)
+            if bracket_content.replace(',', '').replace('.', '').replace(' ', '').isdigit():
+                layer_name = layer_name[:bracket_pos]
         
         # Check if this layer has an assigned color
         if layer_name in self.layer_colors:

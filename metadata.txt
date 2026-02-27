@@ -6,7 +6,7 @@ qgisMinimumVersion=3.0
 qgisMaximumVersion=3.99
 description=This plugin enables users to customize the background colors of layers and groups in the layer tree view, enhancing visual organization and project management. 
 about=It streamlines the organization and management of complex QGIS projects by allowing users to visually distinguish different layers or groups through custom background colors. This plugin adds a menu called "Layer Highlight Color", located above the "Properties" in the "Layer Properties" menu. Always choose pastel or lighter colors. The code implements "WCAG 2.0" contrast ratio checking to avoid colors that can make hard to read the layer text. 
-version=0.3
+version=0.8
 
 homepage=https://github.com/Spartacus1/LayerColorPlugin
 tracker=https://github.com/Spartacus1/LayerColorPlugin/issues
@@ -16,6 +16,25 @@ deprecated=False
 icon=icon.png
 
 changelog=
+
+ Version 0.8:
+ * Fixes color replacement not persisting after save/reopen
+ * Layer/group colors now persist when renamed
+ * Code cleanup (removed unused imports, fixed typos)
+
+ Version 0.7:
+ * Fixes subgroup colors not persisting when saving/reopening projects (Thanks to Joselinah)
+ * Fixes "Show Feature Count" compatibility (now only strips numeric brackets)
+ * Layer names with brackets like "my_layer [note]" are now preserved correctly (Thanks to Furao Sentu)
+
+ Version 0.6:
+ * Fixes an issue where background colors were not applied when "Show Feature Count" was enabled on layers. (Thanks to Thymaro)
+
+ Version 0.5:
+ * Restores QGIS default icon in the upper left main window toolbar in Linux and Windows OS. 
+
+ Version 0.4:
+ * Fixes a minor issue where, under certain conditions, layer pictograms (such as temporary layers "microchip icon") were not displayed (Thanks to Alex-Kent, Apis49 and Kazemar for the detection and suggestions).  
 
  Version 0.3:
  * Fixes a minor issue where, under certain conditions, a layer does not retain its color after the project is closed if the color change is made while it is inside a group.
