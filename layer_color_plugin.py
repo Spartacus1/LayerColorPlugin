@@ -1,8 +1,39 @@
 import os
 from qgis.core import QgsMessageLog, Qgis, QgsProject
-from PyQt5.QtWidgets import QColorDialog, QAction, QMenu
-from PyQt5.QtGui import QColor, QPainter
-from PyQt5.QtCore import Qt, QObject, QEvent
+from qgis.PyQt.QtWidgets import QColorDialog, QMenu, QMessageBox
+from qgis.PyQt.QtGui import QAction, QColor, QPainter
+from qgis.PyQt.QtCore import Qt, QObject, QEvent
+
+
+def _qt_enum(namespace, enum_group, enum_name):
+    """Return a Qt enum value in a way that works in both Qt5 and Qt6."""
+    group = getattr(namespace, enum_group, None)
+    if group is not None and hasattr(group, enum_name):
+        return getattr(group, enum_name)
+    return getattr(namespace, enum_name)
+
+
+def _messagebox_enum(namespace, enum_group, enum_name):
+    """Return a QMessageBox enum value in a way that works in both Qt5 and Qt6."""
+    group = getattr(namespace, enum_group, None)
+    if group is not None and hasattr(group, enum_name):
+        return getattr(group, enum_name)
+    return getattr(namespace, enum_name)
+
+
+def _exec_dialog(dialog):
+    """Execute a dialog in Qt5/Qt6 compatible form."""
+    if hasattr(dialog, "exec"):
+        return dialog.exec()
+    return dialog.exec_()
+
+
+def _exec_menu(menu, global_point):
+    """Execute a menu in Qt5/Qt6 compatible form."""
+    if hasattr(menu, "exec"):
+        return menu.exec(global_point)
+    return menu.exec_(global_point)
+
 
 def log_message(message):
     """
@@ -38,7 +69,7 @@ class LayerColorPlugin:
             self.layer_tree_view.viewport().installEventFilter(self.event_filter)
     
             # 3) Connect the context menu and project events
-            self.layer_tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.layer_tree_view.setContextMenuPolicy(_qt_enum(Qt, "ContextMenuPolicy", "CustomContextMenu"))
             self.layer_tree_view.customContextMenuRequested.connect(self.show_context_menu)
             QgsProject.instance().writeProject.connect(self.save_colors)
             self.iface.projectRead.connect(self.load_colors)
@@ -169,18 +200,30 @@ class LayerColorPlugin:
         paste_color_action.triggered.connect(lambda: self.handle_paste_color(context_menu))
         highlight_menu.addAction(paste_color_action)
     
-        # Insert the submenu before "Properties"
-        actions = context_menu.actions()
-        if actions:
-            context_menu.insertMenu(actions[-1], highlight_menu)
-        else:
+        # Insert the submenu before the last valid action when possible.
+        # In QGIS 4 / Qt6, the default context menu may expose null or invalid QAction
+        # entries during menu construction; inserting before them can trigger warnings
+        # and, in some builds, instability.
+        actions = [a for a in context_menu.actions() if a is not None]
+        
+        inserted = False
+        for action in reversed(actions):
+            try:
+                if action.text():
+                    context_menu.insertMenu(action, highlight_menu)
+                    inserted = True
+                    break
+            except RuntimeError:
+                continue
+        
+        if not inserted:
             context_menu.addMenu(highlight_menu)
     
         # Display the context menu and reconnect the signal afterward
         context_menu.aboutToHide.connect(
             lambda: self.layer_tree_view.customContextMenuRequested.connect(self.show_context_menu)
         )
-        context_menu.exec_(self.layer_tree_view.mapToGlobal(point))
+        _exec_menu(context_menu, self.layer_tree_view.mapToGlobal(point))
         
     def handle_remove_color(self, context_menu):
         self.remove_layer_color()
@@ -238,10 +281,8 @@ class LayerColorPlugin:
             
             # If the contrast is low (less than 4.5, which is the WCAG AA standard)
             if contrast_ratio < 4.5:
-                from PyQt5.QtWidgets import QMessageBox
-                from PyQt5.QtCore import Qt
                 msg = QMessageBox()
-                msg.setIcon(QMessageBox.Warning)
+                msg.setIcon(_messagebox_enum(QMessageBox, "Icon", "Warning"))
                 msg.setText("<h3>Contrast Warning</h3>")  # Using HTML for bigger text
                 msg.setInformativeText("""
                     <p style='font-size: 12pt; margin: 12px 0; font-weight: bold;'>
@@ -257,13 +298,13 @@ class LayerColorPlugin:
                 msg.setMinimumWidth(480)
                 
                 # Config buttons
-                msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-                msg.setDefaultButton(QMessageBox.No)
+                msg.setStandardButtons(_messagebox_enum(QMessageBox, "StandardButton", "Yes") | _messagebox_enum(QMessageBox, "StandardButton", "No"))
+                msg.setDefaultButton(_messagebox_enum(QMessageBox, "StandardButton", "No"))
                 
                 # Adjust window flags
-                msg.setWindowFlags(msg.windowFlags() | Qt.WindowStaysOnTopHint)
+                msg.setWindowFlags(msg.windowFlags() | _qt_enum(Qt, "WindowType", "WindowStaysOnTopHint"))
                 
-                if msg.exec_() == QMessageBox.No:
+                if _exec_dialog(msg) == _messagebox_enum(QMessageBox, "StandardButton", "No"):
                     return
     
             # Apply the color to all selected nodes
@@ -394,22 +435,47 @@ class LayerTreeViewEventFilter(QObject):
         self.tree_view = parent
 
     def eventFilter(self, obj, event):
-        # Intercept paint events on the viewport
-        if event.type() == QEvent.Paint and obj == self.tree_view.viewport():
-            painter = QPainter(obj)
-            
-            # Iterate through all visible items
-            for i in range(self.tree_view.model().rowCount()):
-                index = self.tree_view.model().index(i, 0)
-                self.draw_background_for_item(painter, index)
-                
-                # Also check child items if expanded
-                self.check_child_items(painter, index)
-            
-            # Let the event continue for normal processing
-            return False  # Don't block the event
-        
-        return False  # Always let other events be processed normally
+        """
+        Intercept paint events on the layer-tree viewport.
+    
+        The filter must never allow Python exceptions to escape into Qt/SIP.
+        In QGIS 4 / Qt6, uncaught exceptions inside Python event filters can
+        propagate through sipQObject::eventFilter during stylesheet/theme updates
+        and may crash the application at native level.
+        """
+        painter = None
+    
+        try:
+            if (
+                event.type() == _qt_enum(QEvent, "Type", "Paint")
+                and self.tree_view is not None
+                and obj == self.tree_view.viewport()
+            ):
+                model = self.tree_view.model()
+                if model is None:
+                    return False
+    
+                painter = QPainter(obj)
+    
+                for i in range(model.rowCount()):
+                    index = model.index(i, 0)
+                    self.draw_background_for_item(painter, index)
+                    self.check_child_items(painter, index)
+    
+                painter.end()
+                painter = None
+    
+                return False
+    
+        except Exception as e:
+            log_message(f"LayerColorPlugin eventFilter error: {str(e)}")
+            return False
+    
+        finally:
+            if painter is not None and painter.isActive():
+                painter.end()
+    
+        return False
     
     def check_child_items(self, painter, parent_index):
         """Recursively check all visible child items to color them"""
@@ -427,7 +493,7 @@ class LayerTreeViewEventFilter(QObject):
     def draw_background_for_item(self, painter, index):
         """Draw colored background for an item if it has an assigned color"""
         # Get the layer name
-        layer_name = index.data(Qt.DisplayRole)
+        layer_name = index.data(_qt_enum(Qt, "ItemDataRole", "DisplayRole"))
         
         # Handle "Show Feature Count" - remove suffix like " [42]" only if it's numeric
         if layer_name and ' [' in layer_name and layer_name.endswith(']'):
